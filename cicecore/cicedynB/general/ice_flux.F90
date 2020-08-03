@@ -217,7 +217,11 @@
          fresh   , & ! fresh water flux to ocean (kg/m^2/s)
          fsalt   , & ! salt flux to ocean (kg/m^2/s)
          fhocn   , & ! net heat flux to ocean (W/m^2)
-         fswthru     ! shortwave penetrating to ocean (W/m^2)
+         fswthru , & ! shortwave penetrating to ocean (W/m^2)
+         fswthru_vdr , & ! vis dir shortwave penetrating to ocean (W/m^2)
+         fswthru_vdf , & ! vis dif shortwave penetrating to ocean (W/m^2)
+         fswthru_idr , & ! nir dir shortwave penetrating to ocean (W/m^2)
+         fswthru_idf     ! nir dif shortwave penetrating to ocean (W/m^2)
 
        ! internal
 
@@ -306,6 +310,11 @@
       real (kind=dbl_kind), dimension (:,:,:), allocatable, public :: &
          fresh_da, & ! fresh water flux to ocean due to data assim (kg/m^2/s)
          fsalt_da    ! salt flux to ocean due to data assimilation(kg/m^2/s)
+
+      real (kind=dbl_kind), dimension (:,:,:,:), allocatable, public :: &
+         fswthrun_ai  ! per-category fswthru * ai (W/m^2)
+ 
+      logical (kind=log_kind), public :: send_i2x_per_cat = .false.
 
       !-----------------------------------------------------------------
       ! internal
@@ -438,6 +447,10 @@
          fsalt      (nx_block,ny_block,max_blocks), & ! salt flux to ocean (kg/m^2/s)
          fhocn      (nx_block,ny_block,max_blocks), & ! net heat flux to ocean (W/m^2)
          fswthru    (nx_block,ny_block,max_blocks), & ! shortwave penetrating to ocean (W/m^2)
+         fswthru_vdr (nx_block,ny_block,max_blocks), & ! vis dir shortwave penetrating to ocean (W/m^2)
+         fswthru_vdf (nx_block,ny_block,max_blocks), & ! vis dif shortwave penetrating to ocean (W/m^2)
+         fswthru_idr (nx_block,ny_block,max_blocks), & ! nir dir shortwave penetrating to ocean (W/m^2)
+         fswthru_idf (nx_block,ny_block,max_blocks), & ! nir dif shortwave penetrating to ocean (W/m^2)
          scale_factor (nx_block,ny_block,max_blocks), & ! scaling factor for shortwave components
          strairx_ocn(nx_block,ny_block,max_blocks), & ! stress on ocean by air, x-direction
          strairy_ocn(nx_block,ny_block,max_blocks), & ! stress on ocean by air, y-direction
@@ -527,7 +540,7 @@
       subroutine init_coupler_flux
 
       use ice_arrays_column, only: Cdn_atm
-      use ice_flux_bgc, only: flux_bio_atm, flux_bio, faero_atm, &
+      use ice_flux_bgc, only: flux_bio_atm, flux_bio, faero_atm, fiso_atm, &
            fnit, famm, fsil, fdmsp, fdms, fhum, fdust, falgalN, &
            fdoc, fdon, fdic, ffed, ffep
       use ice_grid, only: bathymetry
@@ -617,6 +630,7 @@
          fsensn_f   (:,:,:,:) =  c0           ! sensible heat flux (W/m^2)
       endif !   
 
+      fiso_atm  (:,:,:,:) = c0           ! isotope deposition rate (kg/m2/s)
       faero_atm (:,:,:,:) = c0           ! aerosol deposition rate (kg/m2/s)
       flux_bio_atm (:,:,:,:) = c0        ! zaero and bio deposition rate (kg/m2/s)
 
@@ -683,6 +697,10 @@
       fpond   (:,:,:) = c0
       fhocn   (:,:,:) = c0
       fswthru (:,:,:) = c0
+      fswthru_vdr (:,:,:) = c0
+      fswthru_vdf (:,:,:) = c0
+      fswthru_idr (:,:,:) = c0
+      fswthru_idf (:,:,:) = c0
       fresh_da(:,:,:) = c0    ! data assimilation
       fsalt_da(:,:,:) = c0
       flux_bio (:,:,:,:) = c0 ! bgc
@@ -700,6 +718,11 @@
       ffep   (:,:,:,:)= c0
       ffed   (:,:,:,:)= c0
       
+      if (send_i2x_per_cat) then
+         allocate(fswthrun_ai(nx_block,ny_block,ncat,max_blocks))
+         fswthrun_ai(:,:,:,:) = c0
+      endif
+
       !-----------------------------------------------------------------
       ! derived or computed fields
       !-----------------------------------------------------------------
@@ -727,6 +750,8 @@
 
       subroutine init_flux_atm
 
+      use ice_flux_bgc, only: fiso_evap, Qref_iso, Qa_iso
+
       character(len=*), parameter :: subname = '(init_flux_atm)'
 
       !-----------------------------------------------------------------
@@ -748,6 +773,10 @@
       Qref    (:,:,:) = c0
       Uref    (:,:,:) = c0
 
+      fiso_evap(:,:,:,:) = c0
+      Qref_iso (:,:,:,:) = c0
+      Qa_iso   (:,:,:,:) = c0
+
       end subroutine init_flux_atm
 
 !=======================================================================
@@ -763,7 +792,7 @@
 
       subroutine init_flux_ocn
 
-      use ice_flux_bgc, only: faero_ocn
+      use ice_flux_bgc, only: faero_ocn, fiso_ocn, HDO_ocn, H2_16O_ocn, H2_18O_ocn
 
       character(len=*), parameter :: subname = '(init_flux_ocn)'
 
@@ -776,7 +805,20 @@
       fpond    (:,:,:)   = c0
       fhocn    (:,:,:)   = c0
       fswthru  (:,:,:)   = c0
-      faero_ocn(:,:,:,:) = c0
+      fswthru_vdr  (:,:,:)   = c0
+      fswthru_vdf  (:,:,:)   = c0
+      fswthru_idr  (:,:,:)   = c0
+      fswthru_idf  (:,:,:)   = c0
+
+      faero_ocn (:,:,:,:) = c0
+      fiso_ocn  (:,:,:,:) = c0
+      HDO_ocn     (:,:,:) = c0
+      H2_16O_ocn  (:,:,:) = c0
+      H2_18O_ocn  (:,:,:) = c0
+
+      if (send_i2x_per_cat) then
+         fswthrun_ai(:,:,:,:) = c0
+      endif
 
       end subroutine init_flux_ocn
 
@@ -966,13 +1008,19 @@
                                Tref,     Qref,     &
                                fresh,    fsalt,    &
                                fhocn,    fswthru,  &
+                               fswthru_vdr, fswthru_vdf, &
+                               fswthru_idr, fswthru_idf, &
                                faero_ocn,          &
                                alvdr,    alidr,    &
                                alvdf,    alidf,    &
                                fzsal,    fzsal_g,  &
                                flux_bio,           &
                                fsurf,    fcondtop, &
-                               Uref,     wind      )
+                               Uref,     wind,     &
+                               Qref_iso,           &
+                               fiso_evap,fiso_ocn)
+
+      use icepack_intfc, only: icepack_max_iso
 
       integer (kind=int_kind), intent(in) :: &
           nx_block, ny_block, &    ! block dimensions
@@ -1006,6 +1054,10 @@
           fsalt   , & ! salt flux to ocean              (kg/m2/s)
           fhocn   , & ! actual ocn/ice heat flx         (W/m**2)
           fswthru , & ! sw radiation through ice bot    (W/m**2)
+          fswthru_vdr , & ! vis dir sw radiation through ice bot    (W/m**2)
+          fswthru_vdf , & ! vis dif sw radiation through ice bot    (W/m**2)
+          fswthru_idr , & ! nir dir sw radiation through ice bot    (W/m**2)
+          fswthru_idf , & ! nir dif sw radiation through ice bot    (W/m**2)
           alvdr   , & ! visible, direct   (fraction)
           alidr   , & ! near-ir, direct   (fraction)
           alvdf   , & ! visible, diffuse  (fraction)
@@ -1030,6 +1082,13 @@
           fzsal   , & ! salt flux to ocean with prognositic salinity (kg/m2/s)  
           fzsal_g     ! Gravity drainage salt flux to ocean (kg/m2/s) 
 
+      ! isotopes
+      real (kind=dbl_kind), dimension(nx_block,ny_block,icepack_max_iso), &
+          optional, intent(inout) :: &
+          Qref_iso , & ! isotope air sp hum reference level      (kg/kg)
+          fiso_evap, & ! isotope evaporation (kg/m2/s)
+          fiso_ocn     ! isotope flux to ocean (kg/m2/s)
+
       ! local variables
 
       real (kind=dbl_kind) :: &
@@ -1048,9 +1107,6 @@
       if (icepack_warnings_aborted()) call abort_ice(error_message=subname, &
          file=__FILE__, line=__LINE__)
 
-!DIR$ CONCURRENT !Cray
-!cdir nodep      !NEC
-!ocl novrec      !Fujitsu
       do j = 1, ny_block
       do i = 1, nx_block
          if (tmask(i,j) .and. aice(i,j) > c0) then
@@ -1070,6 +1126,10 @@
             fsalt   (i,j) = fsalt   (i,j) * ar
             fhocn   (i,j) = fhocn   (i,j) * ar
             fswthru (i,j) = fswthru (i,j) * ar
+            fswthru_vdr (i,j) = fswthru_vdr (i,j) * ar
+            fswthru_vdf (i,j) = fswthru_vdf (i,j) * ar
+            fswthru_idr (i,j) = fswthru_idr (i,j) * ar
+            fswthru_idf (i,j) = fswthru_idf (i,j) * ar
             alvdr   (i,j) = alvdr   (i,j) * ar
             alidr   (i,j) = alidr   (i,j) * ar
             alvdf   (i,j) = alvdf   (i,j) * ar
@@ -1078,6 +1138,9 @@
             fzsal_g (i,j) = fzsal_g (i,j) * ar  
             flux_bio (i,j,:) = flux_bio (i,j,:) * ar
             faero_ocn(i,j,:) = faero_ocn(i,j,:) * ar
+            if (present(Qref_iso )) Qref_iso (i,j,:) = Qref_iso (i,j,:) * ar
+            if (present(fiso_evap)) fiso_evap(i,j,:) = fiso_evap(i,j,:) * ar
+            if (present(fiso_ocn )) fiso_ocn (i,j,:) = fiso_ocn (i,j,:) * ar
          else                   ! zero out fluxes
             strairxT(i,j) = c0
             strairyT(i,j) = c0
@@ -1095,6 +1158,10 @@
             fsalt   (i,j) = c0
             fhocn   (i,j) = c0
             fswthru (i,j) = c0
+            fswthru_vdr (i,j) = c0
+            fswthru_vdf (i,j) = c0
+            fswthru_idr (i,j) = c0
+            fswthru_idf (i,j) = c0
             alvdr   (i,j) = c0  ! zero out albedo where ice is absent
             alidr   (i,j) = c0
             alvdf   (i,j) = c0 
@@ -1103,6 +1170,9 @@
             fzsal_g (i,j) = c0 
             flux_bio (i,j,:) = c0
             faero_ocn(i,j,:) = c0
+            if (present(Qref_iso )) Qref_iso (i,j,:) = c0
+            if (present(fiso_evap)) fiso_evap(i,j,:) = c0
+            if (present(fiso_ocn )) fiso_ocn (i,j,:) = c0
          endif                  ! tmask and aice > 0
       enddo                     ! i
       enddo                     ! j
@@ -1110,9 +1180,6 @@
       ! Scale fluxes for history output
       if (present(fsurf) .and. present(fcondtop) ) then 
      
-!DIR$ CONCURRENT !Cray
-!cdir nodep      !NEC
-!ocl novrec      !Fujitsu
         do j = 1, ny_block
         do i = 1, nx_block
            if (tmask(i,j) .and. aice(i,j) > c0) then

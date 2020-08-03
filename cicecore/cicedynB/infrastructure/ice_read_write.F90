@@ -1,3 +1,6 @@
+#ifdef ncdf
+#define USE_NETCDF
+#endif
 !=======================================================================
 
 ! Routines for opening, reading and writing external files
@@ -15,19 +18,24 @@
           field_loc_noupdate, field_type_noupdate
       use ice_communicate, only: my_task, master_task
       use ice_broadcast, only: broadcast_scalar
-      use ice_domain, only: distrb_info
+      use ice_domain, only: distrb_info, orca_halogrid
       use ice_domain_size, only: max_blocks, nx_global, ny_global, ncat
       use ice_blocks, only: nx_block, ny_block, nghost
       use ice_exit, only: abort_ice
       use ice_fileunits, only: nu_diag
 
-#ifdef ncdf
+#ifdef USE_NETCDF
       use netcdf      
 #endif
 
       implicit none
 
       private
+
+      integer (kind=int_kind), parameter, private :: &
+           bits_per_byte = 8 ! number of bits per byte. 
+                             ! used to determine RecSize in ice_open
+
       public :: ice_open,           &
                 ice_open_ext,       &
                 ice_open_nc,        &
@@ -86,7 +94,7 @@
            nbits         ! no. of bits per variable (0 for sequential access)
 
       integer (kind=int_kind), intent(in), optional :: algn
-      integer (kind=int_kind) :: RecSize, Remnant
+      integer (kind=int_kind) :: RecSize, Remnant, nbytes
 
       character (*) :: filename
 
@@ -99,7 +107,13 @@
             open(nu,file=filename,form='unformatted')
 
          else                   ! direct access
-            RecSize = nx_global*ny_global*nbits/8
+
+            ! use nbytes to compute RecSize.
+            ! this prevents integer overflow with large global grids using nbits
+            ! nx*ny*nbits > 2^31 -1 (i.e., global grid 9000x7054x64)
+            nbytes = nbits/bits_per_byte
+            RecSize = nx_global*ny_global*nbytes
+
             if (present(algn)) then
               ! If data is keept in blocks using given sizes (=algn)
               !  Used in eg. HYCOM binary files, which are stored as "blocks" dividable by 16384 bit (=algn)
@@ -131,6 +145,8 @@
       integer (kind=int_kind), intent(in) :: &
            nu        , & ! unit number
            nbits         ! no. of bits per variable (0 for sequential access)
+      
+      integer (kind=int_kind) :: RecSize, nbytes
 
       character (*) :: filename
 
@@ -150,7 +166,12 @@
             nx = nx_global + 2*nghost
             ny = ny_global + 2*nghost
 
-            open(nu,file=filename,recl=nx*ny*nbits/8, &
+            ! use nbytes to compute RecSize.
+            ! this prevents integer overflow with large global grids using nbits
+            ! nx*ny*nbits > 2^31 -1 (i.e., global grid 9000x7054x64)
+            nbytes = nbits/bits_per_byte
+            RecSize = nx*ny*nbytes
+            open(nu,file=filename,recl=RecSize, &
                   form='unformatted',access='direct')
          endif                   ! nbits = 0
 
@@ -1026,7 +1047,7 @@
 
       character(len=*), parameter :: subname = '(ice_open_nc)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
       integer (kind=int_kind) :: &
         status        ! status variable from netCDF routine 
 
@@ -1040,6 +1061,8 @@
       endif                      ! my_task = master_task
 
 #else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined for '//trim(filename), &
+          file=__FILE__, line=__LINE__)
       fid = -999 ! to satisfy intent(out) attribute
 #endif
       end subroutine ice_open_nc
@@ -1083,7 +1106,7 @@
 
       character(len=*), parameter :: subname = '(ice_read_nc_xy)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
 ! netCDF file diagnostics:
       integer (kind=int_kind) :: & 
          varid          , & ! variable id
@@ -1103,18 +1126,17 @@
 
       integer (kind=int_kind) :: nx, ny
 
-#ifdef ORCA_GRID
       real (kind=dbl_kind), dimension(:,:), allocatable :: &
          work_g2
 
-      if (.not. present(restart_ext)) then
+      if (orca_halogrid .and. .not. present(restart_ext)) then
          if (my_task == master_task) then
             allocate(work_g2(nx_global+2,ny_global+1))
          else
             allocate(work_g2(1,1))   ! to save memory
          endif
+         work_g2(:,:) = c0
       endif
-#endif
 
       nx = nx_global
       ny = ny_global
@@ -1148,22 +1170,16 @@
        ! Read global array 
        !--------------------------------------------------------------
 
-#ifndef ORCA_GRID
-         status = nf90_get_var( fid, varid, work_g1, &
-               start=(/1,1,nrec/), & 
-               count=(/nx,ny,1/) )
-#else
-         if (.not. present(restart_ext)) then
+         if (orca_halogrid .and. .not. present(restart_ext)) then
             status = nf90_get_var( fid, varid, work_g2, &
                start=(/1,1,nrec/), & 
                count=(/nx_global+2,ny_global+1,1/) )
             work_g1 = work_g2(2:nx_global+1,1:ny_global)
          else
             status = nf90_get_var( fid, varid, work_g1, &
-               start=(/1,1,nrec/), & 
-               count=(/nx,ny,1/) )
+                  start=(/1,1,nrec/), & 
+                  count=(/nx,ny,1/) )
          endif
-#endif
 
       endif                     ! my_task = master_task
 
@@ -1207,11 +1223,11 @@
       endif
 
       deallocate(work_g1)
-#ifdef ORCA_GRID
-      if (.not. present(restart_ext)) deallocate(work_g2)
-#endif
+      if (orca_halogrid .and. .not. present(restart_ext)) deallocate(work_g2)
 
 #else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
       work = c0 ! to satisfy intent(out) attribute
 #endif
       end subroutine ice_read_nc_xy
@@ -1255,7 +1271,7 @@
 
       character(len=*), parameter :: subname = '(ice_read_nc_xyz)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
 ! netCDF file diagnostics:
       integer (kind=int_kind) :: & 
          n,               & ! ncat index
@@ -1276,18 +1292,17 @@
 
       integer (kind=int_kind) :: nx, ny
 
-#ifdef ORCA_GRID
       real (kind=dbl_kind), dimension(:,:,:), allocatable :: &
          work_g2
 
-      if (.not. present(restart_ext)) then
+      if (orca_halogrid .and. .not. present(restart_ext)) then
          if (my_task == master_task) then
             allocate(work_g2(nx_global+2,ny_global+1,ncat))
          else
             allocate(work_g2(1,1,ncat))   ! to save memory
          endif
+         work_g2(:,:,:) = c0
       endif
-#endif
 
       nx = nx_global
       ny = ny_global
@@ -1321,12 +1336,7 @@
        ! Read global array 
        !--------------------------------------------------------------
 
-#ifndef ORCA_GRID
-         status = nf90_get_var( fid, varid, work_g1, &
-               start=(/1,1,1,nrec/), & 
-               count=(/nx,ny,ncat,1/) )
-#else
-         if (.not. present(restart_ext)) then
+         if (orca_halogrid .and. .not. present(restart_ext)) then
             status = nf90_get_var( fid, varid, work_g2, &
                start=(/1,1,1,nrec/), & 
                count=(/nx_global+2,ny_global+1,ncat,1/) )
@@ -1336,7 +1346,6 @@
                start=(/1,1,1,nrec/), & 
                count=(/nx,ny,ncat,1/) )
          endif
-#endif
 
       endif                     ! my_task = master_task
 
@@ -1389,11 +1398,11 @@
       endif
 
       deallocate(work_g1)
-#ifdef ORCA_GRID
-      if (.not. present(restart_ext)) deallocate(work_g2)
-#endif
+      if (orca_halogrid .and. .not. present(restart_ext)) deallocate(work_g2)
 
 #else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
       work = c0 ! to satisfy intent(out) attribute
 #endif
       end subroutine ice_read_nc_xyz
@@ -1440,7 +1449,6 @@
 
       ! local variables
 
-#ifdef ncdf
 ! netCDF file diagnostics:
       integer (kind=int_kind) :: & 
          varid,           & ! variable id
@@ -1462,18 +1470,20 @@
 
       integer (kind=int_kind) :: nx, ny
 
-#ifdef ORCA_GRID
+      character(len=*), parameter :: subname = '(ice_read_nc_xyf)'
+
+#ifdef USE_NETCDF
       real (kind=dbl_kind), dimension(:,:,:), allocatable :: &
          work_g2
 
-      if (.not. present(restart_ext)) then
+      if (orca_halogrid .and. .not. present(restart_ext)) then
          if (my_task == master_task) then
             allocate(work_g2(nx_global+2,ny_global+1,nfreq))
          else
             allocate(work_g2(1,1,nfreq))   ! to save memory
          endif
+         work_g2(:,:,:) = c0
       endif
-#endif
 
       nx = nx_global
       ny = ny_global
@@ -1508,13 +1518,7 @@
        ! Read global array 
        !--------------------------------------------------------------
 
-#ifndef ORCA_GRID
-         status = nf90_get_var( fid, varid, work_g1, &
-               start=(/1,1,1,nrec/), & 
-               count=(/nx,ny,nfreq,1/) )
-#else
-          print *, 'restart_ext',restart_ext
-         if (.not. present(restart_ext)) then
+         if (orca_halogrid .and. .not. present(restart_ext)) then
             status = nf90_get_var( fid, varid, work_g2, &
                start=(/1,1,1,nrec/), & 
                count=(/nx_global+2,ny_global+1,nfreq,1/) )
@@ -1524,8 +1528,6 @@
                start=(/1,1,1,nrec/), & 
                count=(/nx,ny,nfreq,1/) )
          endif
-         print *, 'fid',fid ,' varid',varid
-#endif
 
          status = nf90_get_att(fid, varid, "missing_value", missingvalue)
       endif                     ! my_task = master_task
@@ -1583,11 +1585,11 @@
       where (work > 1.0e+30_dbl_kind) work = c0
 
       deallocate(work_g1)
-#ifdef ORCA_GRID
-      if (.not. present(restart_ext)) deallocate(work_g2)
-#endif
+      if (orca_halogrid .and. .not. present(restart_ext)) deallocate(work_g2)
 
 #else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
       work = c0 ! to satisfy intent(out) attribute
 #endif
 
@@ -1622,7 +1624,7 @@
 
       character(len=*), parameter :: subname = '(ice_read_nc_point)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
 ! netCDF file diagnostics:
       integer (kind=int_kind) :: & 
          varid,           & ! netcdf id for field
@@ -1681,6 +1683,8 @@
       work = workg(1) 
 
 #else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
       work = c0 ! to satisfy intent(out) attribute
 #endif
       end subroutine ice_read_nc_point
@@ -1713,7 +1717,7 @@
 
       ! local variables
 
-#ifdef ncdf
+#ifdef USE_NETCDF
       real (kind=dbl_kind), dimension(:), allocatable :: &
            work_z
 
@@ -1731,7 +1735,7 @@
 
       character(len=*), parameter :: subname = '(ice_read_nc_z)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
 
       allocate(work_z(nilyr))
 
@@ -1777,6 +1781,8 @@
       deallocate(work_z)
 
 #else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
       work = c0 ! to satisfy intent(out) attribute
 #endif
       end subroutine ice_read_nc_z
@@ -1813,7 +1819,7 @@
 
       character(len=*), parameter :: subname = '(ice_read_nc_xy)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
 ! netCDF file diagnostics:
       integer (kind=int_kind) :: & 
          status             ! status output from netcdf routines
@@ -1897,7 +1903,11 @@
 
       deallocate(work_g1)
       
+#else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
 #endif
+
       end subroutine ice_write_nc_xy
 
 !=======================================================================
@@ -1932,7 +1942,7 @@
 
       character(len=*), parameter :: subname = '(ice_read_nc_xyz)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
 ! netCDF file diagnostics:
       integer (kind=int_kind) :: & 
          n,               & ! ncat index
@@ -2027,7 +2037,11 @@
 
       deallocate(work_g1)
       
+#else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
 #endif
+
       end subroutine ice_write_nc_xyz
       
 !=======================================================================
@@ -2058,7 +2072,7 @@
 
       character(len=*), parameter :: subname = '(ice_read_global_nc)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
 ! netCDF file diagnostics:
       integer (kind=int_kind) :: & 
          varid,           & ! netcdf id for field
@@ -2073,18 +2087,18 @@
 !    character (char_len) :: &
 !        dimname            ! dimension name            
 !
-#ifdef ORCA_GRID
       real (kind=dbl_kind), dimension(:,:), allocatable :: &
          work_g3
 
-      if (my_task == master_task) then
-          allocate(work_g3(nx_global+2,ny_global+1))
-       else
-          allocate(work_g3(1,1))   ! to save memory
-       endif
+      if (orca_halogrid) then
+         if (my_task == master_task) then
+            allocate(work_g3(nx_global+2,ny_global+1))
+         else
+            allocate(work_g3(1,1))   ! to save memory
+         endif
+         work_g3(:,:) = c0     
+      endif
 
-      work_g3(:,:) = c0     
-#endif
       work_g(:,:) = c0
 
       if (my_task == master_task) then
@@ -2103,16 +2117,16 @@
        ! Read global array 
        !--------------------------------------------------------------
  
-#ifndef ORCA_GRID
-         status = nf90_get_var( fid, varid, work_g, &
-               start=(/1,1,nrec/), & 
-               count=(/nx_global,ny_global,1/) )
-#else
-         status = nf90_get_var( fid, varid, work_g3, &
-               start=(/1,1,nrec/), &
-               count=(/nx_global+2,ny_global+1,1/) )
-         work_g=work_g3(2:nx_global+1,1:ny_global)
-#endif
+         if (orca_halogrid) then
+            status = nf90_get_var( fid, varid, work_g3, &
+                  start=(/1,1,nrec/), &
+                  count=(/nx_global+2,ny_global+1,1/) )
+            work_g=work_g3(2:nx_global+1,1:ny_global)
+         else
+            status = nf90_get_var( fid, varid, work_g, &
+                  start=(/1,1,nrec/), & 
+                  count=(/nx_global,ny_global,1/) )
+         endif
       endif                     ! my_task = master_task
 
     !-------------------------------------------------------------------
@@ -2135,13 +2149,14 @@
          write(nu_diag,*) 'min, max, sum = ', amin, amax, asum, trim(varname)
       endif
 
-#ifdef ORCA_GRID
-      deallocate(work_g3)
-#endif
+      if (orca_halogrid) deallocate(work_g3)
 
 #else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
       work_g = c0 ! to satisfy intent(out) attribute
 #endif
+
       end subroutine ice_read_global_nc
 
 !=======================================================================
@@ -2158,13 +2173,16 @@
 
       character(len=*), parameter :: subname = '(ice_close_nc)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
       integer (kind=int_kind) :: &
         status        ! status variable from netCDF routine 
 
       if (my_task == master_task) then
          status = nf90_close(fid)
       endif
+#else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
 #endif
 
       end subroutine ice_close_nc
@@ -2209,7 +2227,7 @@
 
       character(len=*), parameter :: subname = '(ice_read_nc_uv)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
 ! netCDF file diagnostics:
       integer (kind=int_kind) :: & 
          varid          , & ! variable id
@@ -2300,8 +2318,11 @@
       deallocate(work_g1)
 
 #else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
       work = c0 ! to satisfy intent(out) attribute
 #endif
+
       end subroutine ice_read_nc_uv
 
 !=======================================================================
@@ -2332,7 +2353,7 @@
 
       character(len=*), parameter :: subname = '(ice_read_vec_nc)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
 ! netCDF file diagnostics:
       integer (kind=int_kind) :: &
          varid,           & ! netcdf id for field
@@ -2375,9 +2396,11 @@
       endif
 
 #else
-      write(*,*) 'ERROR: ncdf not defined during compilation'
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
       work_g = c0 ! to satisfy intent(out) attribute
 #endif
+
       end subroutine ice_read_vec_nc
 
 !=======================================================================
@@ -2393,7 +2416,7 @@
 
       ! local variables
 
-#ifdef ncdf
+#ifdef USE_NETCDF
       integer (kind=int_kind) :: &
          ndims, i, status
       character (char_len) :: &
@@ -2401,7 +2424,7 @@
 #endif
       character(len=*), parameter :: subname = '(ice_get_ncvarsize)'
 
-#ifdef ncdf
+#ifdef USE_NETCDF
       if (my_task ==  master_task) then
          status=nf90_inquire(fid, nDimensions = nDims)
          if (status /= nf90_noerr) then
@@ -2419,9 +2442,11 @@
          endif
       endif
 #else
-      write(*,*) 'ERROR: ncdf not defined during compilation'
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
       recsize = 0 ! to satisfy intent(out) attribute
 #endif
+
       end subroutine ice_get_ncvarsize
 
 !=======================================================================

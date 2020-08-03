@@ -1,3 +1,6 @@
+#ifdef ncdf
+#define USE_NETCDF
+#endif
 !=======================================================================
 
 ! Read and write ice model restart files using netCDF or binary
@@ -8,10 +11,12 @@
 
       use ice_broadcast
       use ice_kinds_mod
+#ifdef USE_NETCDF
       use netcdf
+#endif
       use ice_restart_shared, only: &
           restart_ext, restart_dir, restart_file, pointer_file, &
-          runid, use_restart_time, lcdf64, lenstr
+          runid, use_restart_time, lcdf64, lenstr, restart_coszen
       use ice_fileunits, only: nu_diag, nu_rst_pointer
       use ice_exit, only: abort_ice
       use icepack_intfc, only: icepack_query_parameters
@@ -52,6 +57,7 @@
 
       character(len=*), parameter :: subname = '(init_restart_read)'
 
+#ifdef USE_NETCDF
       if (present(ice_ic)) then 
          filename = trim(ice_ic)
       else
@@ -84,7 +90,6 @@
          endif
          endif ! use namelist values if use_restart_time = F
 
-         write(nu_diag,*) 'Restart read at istep=',istep0,time,time_forc
       endif
 
       call broadcast_scalar(istep0,master_task)
@@ -98,6 +103,10 @@
       if (trim(runid) == 'bering') then
          npt = npt - istep0
       endif
+#else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined for '//trim(ice_ic), &
+          file=__FILE__, line=__LINE__)
+#endif
 
       end subroutine init_restart_read
 
@@ -113,7 +122,7 @@
                               time, time_forc, year_init
       use ice_communicate, only: my_task, master_task
       use ice_domain_size, only: nx_global, ny_global, ncat, nilyr, nslyr, &
-                                 n_aero, nblyr, n_zaero, n_algae, n_doc,   &
+                                 n_iso, n_aero, nblyr, n_zaero, n_algae, n_doc,   &
                                  n_dic, n_don, n_fed, n_fep, nfsd
       use ice_arrays_column, only: oceanmixed_ice
       use ice_dyn_shared, only: kdyn
@@ -124,13 +133,13 @@
 
       logical (kind=log_kind) :: &
          solve_zsal, skl_bgc, z_tracers, tr_fsd, &
-         tr_iage, tr_FY, tr_lvl, tr_aero, tr_pond_cesm, &
+         tr_iage, tr_FY, tr_lvl, tr_iso, tr_aero, tr_pond_cesm, &
          tr_pond_topo, tr_pond_lvl, tr_brine, &
          tr_bgc_N, tr_bgc_C, tr_bgc_Nit, &
          tr_bgc_Sil, tr_bgc_DMS, &
-         tr_bgc_chl,  tr_bgc_Am, &
+         tr_bgc_chl, tr_bgc_Am,  &
          tr_bgc_PON, tr_bgc_DON, &
-         tr_zaero,    tr_bgc_Fe, &
+         tr_zaero,   tr_bgc_Fe,  &
          tr_bgc_hum
 
       integer (kind=int_kind) :: &
@@ -154,13 +163,14 @@
 
       character(len=*), parameter :: subname = '(init_restart_write)'
 
+#ifdef USE_NETCDF
       call icepack_query_parameters( &
          solve_zsal_out=solve_zsal, skl_bgc_out=skl_bgc, z_tracers_out=z_tracers)
       call icepack_query_tracer_sizes( &
          nbtrcr_out=nbtrcr)
       call icepack_query_tracer_flags( &
          tr_iage_out=tr_iage, tr_FY_out=tr_FY, tr_lvl_out=tr_lvl, tr_fsd_out=tr_fsd, &
-         tr_aero_out=tr_aero, tr_pond_cesm_out=tr_pond_cesm, &
+         tr_iso_out=tr_iso, tr_aero_out=tr_aero, tr_pond_cesm_out=tr_pond_cesm, &
          tr_pond_topo_out=tr_pond_topo, tr_pond_lvl_out=tr_pond_lvl, tr_brine_out=tr_brine, &
          tr_bgc_N_out=tr_bgc_N, tr_bgc_C_out=tr_bgc_C, tr_bgc_Nit_out=tr_bgc_Nit, &
          tr_bgc_Sil_out=tr_bgc_Sil, tr_bgc_DMS_out=tr_bgc_DMS, &
@@ -227,10 +237,9 @@
 
          call define_rest_field(ncid,'uvel',dims)
          call define_rest_field(ncid,'vvel',dims)
+         
+         if (restart_coszen) call define_rest_field(ncid,'coszen',dims)
 
-#ifdef CESMCOUPLED
-         call define_rest_field(ncid,'coszen',dims)
-#endif
          call define_rest_field(ncid,'scale_factor',dims)
          call define_rest_field(ncid,'swvdr',dims)
          call define_rest_field(ncid,'swvdf',dims)
@@ -470,6 +479,14 @@
             enddo
          endif
 
+         if (tr_iso) then
+            do k=1,n_iso
+               write(nchar,'(i3.3)') k
+               call define_rest_field(ncid,'isosno'//trim(nchar),dims)
+               call define_rest_field(ncid,'isoice'//trim(nchar),dims)
+            enddo
+         endif
+
          if (tr_aero) then
             do k=1,n_aero
                write(nchar,'(i3.3)') k
@@ -613,6 +630,11 @@
          write(nu_diag,*) 'Writing ',filename(1:lenstr(filename))
       endif ! master_task
 
+#else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined for '//trim(filename_spec), &
+          file=__FILE__, line=__LINE__)
+#endif
+
       end subroutine init_restart_write
 
 !=======================================================================
@@ -655,6 +677,7 @@
 
       character(len=*), parameter :: subname = '(read_restart_field)'
 
+#ifdef USE_NETCDF
          if (present(field_loc)) then
             if (ndim3 == ncat) then
                if (restart_ext) then
@@ -692,6 +715,11 @@
                write(nu_diag,*) 'ndim3 not supported ',ndim3
             endif
          endif
+
+#else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
+#endif
 
       end subroutine read_restart_field
       
@@ -734,6 +762,7 @@
 
       character(len=*), parameter :: subname = '(write_restart_field)'
 
+#ifdef USE_NETCDF
          status = nf90_inq_varid(ncid,trim(vname),varid)
          if (ndim3 == ncat) then 
             if (restart_ext) then
@@ -752,6 +781,11 @@
             write(nu_diag,*) 'ndim3 not supported',ndim3
          endif
 
+#else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
+#endif
+
       end subroutine write_restart_field
 
 !=======================================================================
@@ -768,10 +802,16 @@
 
       character(len=*), parameter :: subname = '(final_restart)'
 
+#ifdef USE_NETCDF
       status = nf90_close(ncid)
 
       if (my_task == master_task) &
          write(nu_diag,*) 'Restart read/written ',istep1,time,time_forc
+
+#else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
+#endif
 
       end subroutine final_restart
 
@@ -793,7 +833,12 @@
 
       character(len=*), parameter :: subname = '(define_rest_field)'
 
+#ifdef USE_NETCDF
       status = nf90_def_var(ncid,trim(vname),nf90_double,dims,varid)
+#else
+      call abort_ice(subname//'ERROR: USE_NETCDF cpp not defined', &
+          file=__FILE__, line=__LINE__)
+#endif
         
       end subroutine define_rest_field
 

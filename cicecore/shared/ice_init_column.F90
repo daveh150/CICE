@@ -45,7 +45,7 @@
                 init_age, init_FY, init_lvl, init_fsd, &
                 init_meltponds_cesm, init_meltponds_lvl, init_meltponds_topo, &
                 init_aerosol, init_bgc, init_hbrine, init_zbgc, input_zbgc, &
-                count_tracers
+                count_tracers, init_isotope
 
       ! namelist parameters needed locally
 
@@ -181,7 +181,8 @@
       subroutine init_shortwave
 
       use ice_arrays_column, only: fswpenln, Iswabsn, Sswabsn, albicen, &
-          albsnon, alvdrn, alidrn, alvdfn, alidfn, fswsfcn, fswthrun, &
+          albsnon, alvdrn, alidrn, alvdfn, alidfn, fswsfcn, &
+          fswthrun, fswthrun_vdr, fswthrun_vdf, fswthrun_idr, fswthrun_idf, &
           fswintn, albpndn, apeffn, trcrn_sw, dhsn, ffracn, snowfracn, &
           kaer_tab, waer_tab, gaer_tab, kaer_bc_tab, waer_bc_tab, gaer_bc_tab, bcenh, &
           swgrid, igrid
@@ -254,8 +255,6 @@
 
       allocate(ztrcr_sw(nbtrcr_sw, ncat))
 
-      !!$OMP PARALLEL DO PRIVATE(iblk,i,j,n,ilo,ihi,jlo,jhi,this_block, &
-      !!$OMP                     l_print_point,debug,ipoint)
       do iblk=1,nblocks
 
          ! Initialize
@@ -306,6 +305,10 @@
                fswsfcn(i,j,n,iblk) = c0
                fswintn(i,j,n,iblk) = c0
                fswthrun(i,j,n,iblk) = c0
+               fswthrun_vdr(i,j,n,iblk) = c0
+               fswthrun_vdf(i,j,n,iblk) = c0
+               fswthrun_idr(i,j,n,iblk) = c0
+               fswthrun_idf(i,j,n,iblk) = c0
             enddo   ! ncat
 
          enddo
@@ -365,7 +368,12 @@
                           alvdrn=alvdrn(i,j,:,iblk),     alvdfn=alvdfn(i,j,:,iblk), &
                           alidrn=alidrn(i,j,:,iblk),     alidfn=alidfn(i,j,:,iblk), &
                           fswsfcn=fswsfcn(i,j,:,iblk),   fswintn=fswintn(i,j,:,iblk), &
-                          fswthrun=fswthrun(i,j,:,iblk), fswpenln=fswpenln(i,j,:,:,iblk), &
+                          fswthrun=fswthrun(i,j,:,iblk),                       &
+                          fswthrun_vdr=fswthrun_vdr(i,j,:,iblk),               &
+                          fswthrun_vdf=fswthrun_vdf(i,j,:,iblk),               &
+                          fswthrun_idr=fswthrun_idr(i,j,:,iblk),               &
+                          fswthrun_idf=fswthrun_idf(i,j,:,iblk),               &
+                          fswpenln=fswpenln(i,j,:,:,iblk),                     &
                           Sswabsn=Sswabsn(i,j,:,:,iblk), Iswabsn=Iswabsn(i,j,:,:,iblk), &
                           albicen=albicen(i,j,:,iblk),   albsnon=albsnon(i,j,:,iblk), &
                           albpndn=albpndn(i,j,:,iblk),   apeffn=apeffn(i,j,:,iblk), &
@@ -387,12 +395,18 @@
               enddo
             endif
 
+         enddo ! i
+         enddo ! j
+
       !-----------------------------------------------------------------
       ! Aggregate albedos 
+      ! Match loop order in coupling_prep for same order of operations
       !-----------------------------------------------------------------
 
-            do n = 1, ncat
-               
+         do n = 1, ncat
+         do j = jlo, jhi
+         do i = ilo, ihi
+
                if (aicen(i,j,n,iblk) > puny) then
                   
                   alvdf(i,j,iblk) = alvdf(i,j,iblk) &
@@ -422,7 +436,12 @@
                
                endif ! aicen > puny
 
-            enddo  ! ncat
+         enddo ! i
+         enddo ! j
+         enddo ! ncat
+
+         do j = 1, ny_block
+         do i = 1, nx_block
 
       !----------------------------------------------------------------
       ! Store grid box mean albedos and fluxes before scaling by aice
@@ -432,14 +451,14 @@
             alidf_ai  (i,j,iblk) = alidf  (i,j,iblk)
             alvdr_ai  (i,j,iblk) = alvdr  (i,j,iblk)
             alidr_ai  (i,j,iblk) = alidr  (i,j,iblk)
-            
+
             ! for history averaging
 !echmod?            cszn = c0
 !echmod            if (coszen(i,j,iblk) > puny) cszn = c1
 !echmod            do n = 1, nstreams
 !echmod               albcnt(i,j,iblk,n) = albcnt(i,j,iblk,n) + cszn
 !echmod            enddo
-            
+
       !----------------------------------------------------------------
       ! Save net shortwave for scaling factor in scale_factor
       !----------------------------------------------------------------
@@ -662,6 +681,21 @@
 
 !=======================================================================
 
+!  Initialize isotope tracers (call prior to reading restart data)
+
+      subroutine init_isotope(isosno, isoice)
+
+      real(kind=dbl_kind), dimension(:,:,:,:), intent(out) :: &
+         isosno, isoice
+      character(len=*),parameter :: subname='(init_isotope)'
+
+      isosno(:,:,:,:) = c0
+      isoice(:,:,:,:) = c0
+
+      end subroutine init_isotope
+
+!=======================================================================
+
 !  Initialize ice aerosol tracer (call prior to reading restart data)
 
       subroutine init_aerosol(aero)
@@ -761,7 +795,7 @@
       
       if (solve_zsal) then  ! default values 
 
-         !$OMP PARALLEL DO PRIVATE(iblk,i,j,n,ilo,ihi,jlo,jhi,this_block)
+         !$OMP PARALLEL DO PRIVATE(iblk,i,j,k,n,ilo,ihi,jlo,jhi,this_block,trcrn_bgc)
          do iblk = 1, nblocks
 
             this_block = get_block(blocks_ice(iblk),iblk)         
@@ -792,6 +826,7 @@
             enddo      ! i
             enddo      ! j  
          enddo         ! iblk
+         !$OMP END PARALLEL DO
          call icepack_warnings_flush(nu_diag)
          if (icepack_warnings_aborted()) call abort_ice(error_message=subname, &
             file=__FILE__, line=__LINE__)
@@ -831,6 +866,7 @@
             enddo  ! j
 
          enddo     ! iblk
+         !$OMP END PARALLEL DO
 
          call icepack_warnings_flush(nu_diag)
          if (icepack_warnings_aborted()) call abort_ice(error_message=subname, &
@@ -841,7 +877,7 @@
 
       endif     ! .not. restart
 
-      !$OMP PARALLEL DO PRIVATE(iblk,i,j,n,ilo,ihi,jlo,jhi,this_block)
+      !$OMP PARALLEL DO PRIVATE(iblk,i,j,k,n,ilo,ihi,jlo,jhi,this_block,sicen,trcrn_bgc)
       do iblk = 1, nblocks
 
          this_block = get_block(blocks_ice(iblk),iblk)         
@@ -876,6 +912,7 @@
          enddo  ! j
 
       enddo     ! iblk
+      !$OMP END PARALLEL DO
 
       call icepack_warnings_flush(nu_diag)
       if (icepack_warnings_aborted()) call abort_ice(error_message=subname, &
@@ -901,6 +938,7 @@
             enddo  ! i
             enddo  ! j
          enddo     ! iblk
+         !$OMP END PARALLEL DO
 
          call icepack_warnings_flush(nu_diag)
          if (icepack_warnings_aborted()) call abort_ice(error_message=subname, &
@@ -1722,7 +1760,7 @@
 
       subroutine count_tracers
 
-      use ice_domain_size, only: nilyr, nslyr, nblyr, nfsd, &
+      use ice_domain_size, only: nilyr, nslyr, nblyr, nfsd, n_iso, &
           n_aero, n_zaero, n_algae, n_doc, n_dic, n_don, n_fed, n_fep
 
       ! local variables
@@ -1734,10 +1772,10 @@
 
       integer (kind=int_kind) :: ntrcr
       logical (kind=log_kind) :: tr_iage, tr_FY, tr_lvl, tr_pond, tr_aero, tr_fsd
-      logical (kind=log_kind) :: tr_pond_cesm, tr_pond_lvl, tr_pond_topo
+      logical (kind=log_kind) :: tr_iso, tr_pond_cesm, tr_pond_lvl, tr_pond_topo
       integer (kind=int_kind) :: nt_Tsfc, nt_sice, nt_qice, nt_qsno, nt_iage, nt_FY
       integer (kind=int_kind) :: nt_alvl, nt_vlvl, nt_apnd, nt_hpnd, nt_ipnd, nt_aero
-      integer (kind=int_kind) :: nt_fsd
+      integer (kind=int_kind) :: nt_fsd, nt_isosno, nt_isoice
 
       integer (kind=int_kind) :: &
          nbtrcr,        nbtrcr_sw,     &
@@ -1820,6 +1858,7 @@
          tr_lvl_out=tr_lvl, tr_aero_out=tr_aero, tr_pond_out=tr_pond, &
          tr_pond_cesm_out=tr_pond_cesm, tr_pond_lvl_out=tr_pond_lvl, &
          tr_pond_topo_out=tr_pond_topo, tr_brine_out=tr_brine, tr_fsd_out=tr_fsd, &
+         tr_iso_out=tr_iso, &
          tr_bgc_Nit_out=tr_bgc_Nit, tr_bgc_Am_out =tr_bgc_Am,  tr_bgc_Sil_out=tr_bgc_Sil,   &
          tr_bgc_DMS_out=tr_bgc_DMS, tr_bgc_PON_out=tr_bgc_PON, &
          tr_bgc_N_out  =tr_bgc_N,   tr_bgc_C_out  =tr_bgc_C,   tr_bgc_chl_out=tr_bgc_chl,   &
@@ -1888,13 +1927,22 @@
           ntrcr = ntrcr + nfsd
       endif
 
+      nt_isosno = 0
+      nt_isoice = 0
+      if (tr_iso) then
+          nt_isosno = ntrcr + 1    ! isotopes in snow
+          ntrcr = ntrcr + n_iso
+          nt_isoice = ntrcr + 1    ! isotopes in ice
+          ntrcr = ntrcr + n_iso
+      endif
+
       nt_aero = 0
       if (tr_aero) then
           nt_aero = ntrcr + 1
           ntrcr = ntrcr + 4*n_aero ! 4 dEdd layers, n_aero species
       else
 !tcx, modify code so we don't have to reset n_aero here
-          n_aero = 0
+          n_aero = 0       !echmod - this is not getting set correctly (overwritten later?)
       endif
               
       !-----------------------------------------------------------------
@@ -1903,6 +1951,7 @@
 
       nbtrcr = 0
       nbtrcr_sw = 0
+      nt_zbgc_frac = 0
 
       ! vectors of size icepack_max_algae
       nlt_bgc_N(:) = 0
@@ -2150,7 +2199,6 @@
             enddo   ! mm
          endif      ! tr_zaero
 
-         nt_zbgc_frac = 0
          if (nbtrcr > 0) then
             nt_zbgc_frac = ntrcr + 1
             ntrcr = ntrcr + nbtrcr
@@ -2169,6 +2217,8 @@
       if (nt_hpnd  <= 0) nt_hpnd  = ntrcr
       if (nt_ipnd  <= 0) nt_ipnd  = ntrcr
       if (nt_fsd   <= 0) nt_fsd   = ntrcr
+      if (nt_isosno<= 0) nt_isosno= ntrcr
+      if (nt_isoice<= 0) nt_isoice= ntrcr
       if (nt_aero  <= 0) nt_aero  = ntrcr
       if (nt_fbri  <= 0) nt_fbri  = ntrcr
       if (nt_bgc_S <= 0) nt_bgc_S = ntrcr
@@ -2192,7 +2242,7 @@
          nt_qice_in=nt_qice, nt_qsno_in=nt_qsno, nt_iage_in=nt_iage, nt_fy_in=nt_fy, &
          nt_alvl_in=nt_alvl, nt_vlvl_in=nt_vlvl, nt_apnd_in=nt_apnd, nt_hpnd_in=nt_hpnd, &
          nt_ipnd_in=nt_ipnd, nt_fsd_in=nt_fsd, nt_aero_in=nt_aero, &
-         nt_fbri_in=nt_fbri,      &
+         nt_isosno_in=nt_isosno,     nt_isoice_in=nt_isoice,       nt_fbri_in=nt_fbri,      &
          nt_bgc_Nit_in=nt_bgc_Nit,   nt_bgc_Am_in=nt_bgc_Am,       nt_bgc_Sil_in=nt_bgc_Sil,   &
          nt_bgc_DMS_in=nt_bgc_DMS,   nt_bgc_PON_in=nt_bgc_PON,     nt_bgc_S_in=nt_bgc_S,     &
          nt_bgc_N_in=nt_bgc_N,       nt_bgc_chl_in=nt_bgc_chl,   &

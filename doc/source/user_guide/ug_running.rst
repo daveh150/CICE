@@ -14,9 +14,10 @@ Software Requirements
 
 To run stand-alone, CICE requires
 
+- bash and csh
 - gmake (GNU Make)
 - Fortran and C	compilers (Intel, PGI, GNU, Cray, and NAG have been tested)
-- NetCDF
+- NetCDF (this is actually optional but required to test out of the box configurations)
 - MPI (this is actually	optional but without it	you can	only run on 1 processor)
 
 Below are lists of software versions that the Consortium has tested at some point.  There is no
@@ -101,9 +102,7 @@ There are three usage modes,
 * ``--test`` creates individual tests.  Tests are just cases that have some extra automation in order to carry out particular tests such as exact restart.
 * ``--suite`` creates a test suite.  Test suites are predefined sets of tests and ``--suite`` provides the ability to quickly setup, build, and run a full suite of tests.
 
-All modes will require use of ``--mach`` or ``-m`` to specify the machine and case and test modes 
-can use ``--set`` or ``-s`` to define specific options.  ``--test`` and ``--suite`` will require ``--testid`` to be set 
-and both of the test modes can use ``--bdir``, ``--bgen``, ``--bcmp``, and ``--diff`` to generate (save) results and compare results with prior results as well as ``--tdir`` to specify the location of the test directory.
+All modes will require use of ``--mach`` or ``-m`` to specify the machine.  Use of ``--env`` is also recommended to specify the compilation environment.  ``--case`` and ``--test`` modes can use ``--set`` or ``-s`` which will turn on various model options.  ``--test`` and ``--suite`` will require ``--testid`` to be set and can use ``--bdir``, ``--bgen``, ``--bcmp``, and ``--diff`` to generate (save) results for regression testing (comparison with prior results). ``--tdir`` will specify the location of the test directory.
 Testing will be described in greater detail in the :ref:`testing` section.
 
 Again, ``cice.setup --help`` will show the latest usage information including 
@@ -111,15 +110,15 @@ the available ``--set`` options, the current ported machines, and the test choic
 
 To create a case, run **cice.setup**::
 
-  cice.setup -c mycase -m machine
+  cice.setup -c mycase -m machine -e intel
   cd mycase
 
 Once a case/test is created, several files are placed in the case directory
 
-- **env.[machine]** defines the environment
+- **env.[machine]_[env]** defines the environment
 - **cice.settings** defines many variables associated with building and running the model
 - **makdep.c** is a tool that will automatically generate the make dependencies
-- **Macros.[machine]** defines the Makefile macros
+- **Macros.[machine]_[env]** defines the Makefile macros
 - **Makefile** is the makefile used to build the model
 - **cice.build** is a script that calls the Makefile and compiles the model
 - **ice\_in** is the namelist input file
@@ -137,16 +136,20 @@ The **casescripts/** directory holds scripts used to create the case and can
 largely be ignored.  Once a case is created, the **cice.build** script should be run
 interactively and then the case should be submitted by executing the 
 **cice.submit** script interactively.  The **cice.submit** script
-simply submits the **cice.run script**.  
-You can also submit the **cice.run** script on the command line.
+submits the **cice.run script** or **cice.test** script.  These scripts can
+also be run interactively or submitted manually without the **cice.submit** script.
 
 Some hints:
 
-- To change the block sizes required at build time, edit the **cice.settings** file.
 - To change namelist, manually edit the **ice_in** file
 - To change batch settings, manually edit the top of the **cice.run** or **cice.test** (if running a test) file
+- When the run scripts are submitted, the current **ice_in**, **cice.settings**, and **env.[machine]** files are copied from the case directory into the run directory.  Users should generally not edit files in the run directory as these are overwritten when following the standard workflow.  **cice.settings** can be sourced to establish the case values in the login shell.  An alias like the following can be established to quickly switch between case and run directories::
+
+    alias  cdrun 'cd `\grep "setenv ICE_RUNDIR"  cice.settings | awk "{print "\$"NF}"`'
+    alias cdcase 'cd `\grep "setenv ICE_CASEDIR" cice.settings | awk "{print "\$"NF}"`'
+
 - To turn on the debug compiler flags, set ``ICE_BLDDEBUG`` in **cice.setttings** to true.  It is also possible to use the ``debug`` option  (``-s debug``) when creating the case with **cice.setup** to set this option automatically.
-- To change compiler options, manually edit the Macros file
+- To change compiler options, manually edit the Macros file. To add user defined preprocessor macros, modify ``ICE_CPPDEFS`` in **cice.settings** using the syntax ``-DCICE_MACRO``.
 - To clean the build before each compile, set ``ICE_CLEANBUILD`` in **cice.settings** to true (this is the default value), or use the ``buildclean`` option (``-s buildclean``)  when creating the case with **cice.setup**.  To not clean before the build, set ``ICE_CLEANBUILD`` in **cice.settings** to false, or use the ``buildincremental`` option  (``-s buildincremental``) when creating the case with **cice.setup**.  It is recommended that the ``ICE_CLEANBUILD`` be set to true if there are any questions about whether the build is proceeding properly.
 
 To build and run::
@@ -154,7 +157,7 @@ To build and run::
   ./cice.build
   ./cice.submit
 
-The build and run log files will be copied into the logs directory in the case directory.
+The build and run log files will be copied into the logs subdirectory in the case directory.
 Other model output will be in the run directory.  The run directory is set in **cice.settings**
 via the ``ICE_RUNDIR`` variable.  To modify the case setup, changes should be made in the
 case directory, NOT the run directory.
@@ -182,10 +185,10 @@ Testing will be described in greater detail in the :ref:`testing` section.
   specifies the case name.  This can be either a relative path of an absolute path.  This cannot be used with --test or --suite.  Either ``--case``, ``--test``, or ``--suite`` is required.
 
 ``--mach``, ``-m`` MACHINE
-  specifies the machine name.  This should be consistent with the name defined in the Macros and env files in **configurations/scripts/machines**.  This is required in all modes.
+  specifies the machine name.  This should be consistent with the name defined in the Macros and env files in **configurations/scripts/machines**.  This is required in all modes and is paired with ``--env`` to define the compilation environment.
 
 ``--env``,  ``-e`` ENVIRONMENT1,ENVIRONMENT2,ENVIRONMENT3
-  specifies the environment or compiler associated with the machine.  This should be consistent with the name defined in the Macros and env files in **configurations/scripts/machines**.  Each machine can have multiple supported environments including support for different compilers or other system setups.  When used with ``--suite`` or ``--test``, the ENVIRONMENT can be a set of comma deliminated values with no spaces and the tests will then be run for all of those environments.  With ``--case``, only one ENVIRONMENT should be specified. (default is intel)
+specifies the compilation environment associated with the machine.  This should be consistent with the name defined in the Macros and env files in **configurations/scripts/machines**.  Each machine can have multiple supported environments including support for different compilers, different compiler versions, different mpi libraries, or other system settigs.  When used with ``--suite`` or ``--test``, the ENVIRONMENT can be a set of comma deliminated values with no spaces and the tests will then be run for all of those environments.  With ``--case``, only one ENVIRONMENT should be specified. (default is intel)
   
 ``--pes``,  ``-p`` MxN[[xBXxBY[xMB]
   specifies the number of tasks and threads the case should be run on.  This only works with ``--case``.  The format is tasks x threads or "M"x"N" where M is tasks and N is threads and both are integers. BX, BY, and MB can also be set via this option where BX is the x-direction blocksize, BY is the y-direction blocksize, and MB is the max-blocks setting.  If BX, BY, and MB are not set, they will be computed automatically based on the grid size and the task/thread count.  More specifically, this option has three modes, --pes MxN, --pes MxNxBXxBY, and --pes MxNxBXxBYxMB.  (default is 4x1)
@@ -200,7 +203,10 @@ Testing will be described in greater detail in the :ref:`testing` section.
   specifies the grid.  This is a string and for the current CICE driver, gx1, gx3, and tx1 are supported. (default = gx3)
 
 ``--set``,  ``-s`` SET1,SET2,SET3
-  specifies the optional settings for the case.  The settings for ``--suite`` are defined in the suite file.  Multiple settings can be specified by providing a comma deliminated set of values without spaces between settings.  The available settings are in **configurations/scripts/options** and ``cice.setup --help`` will also list them.  These settings files can change either the namelist values or overall case settings (such as the debug flag).
+  specifies the optional settings for the case.  The settings for ``--suite`` are defined in the suite file.  Multiple settings can be specified by providing a comma deliminated set of values without spaces between settings.  The available settings are in **configurations/scripts/options** and ``cice.setup --help`` will also list them.  These settings files can change either the namelist values or overall case settings (such as the debug flag).  For cases and tests (not suites), settings defined in **~/.cice_set** (if it exists) will be included in the --set options.  This behaviour can be overridden with the `--ignore-user-set`` command line option.
+
+``--ignore-user-set``
+  ignores settings defined in **~/.cice.set** (if it exists) for cases and tests.  **~/.cice_set** is always ignored for test suites.
 
 For CICE, when setting up cases, the ``--case`` and ``--mach`` must be specified.  
 It's also recommended that ``--env`` be set explicitly as well.  
@@ -225,8 +231,14 @@ files **configuration/scripts/ice_in** and
 settings (options), the set_env.setting and set_nml.setting will be used to 
 change the defaults.  This is done as part of the ``cice.setup`` and the
 modifications are resolved in the **cice.settings** and **ice_in** file placed in 
-the case directory.  If multiple options are chosen and then conflict, then the last
-option chosen takes precedent.  Not all options are compatible with each other.
+the case directory.  If multiple options are chosen that conflict, then the last
+option chosen takes precedence.  Not all options are compatible with each other.
+
+Settings defined in **~/.cice_set** (if it exists) will be included in the ``--set`` 
+options.  This behaviour can be overridden with the `--ignore-user-set`` command 
+line option.  The format of the **~/.cice_set** file is a identical to the
+``--set`` option, a single comma-delimited line of options.  Settings on the 
+command line will take precedence over settings defined in **~/.cice_set**.
 
 Some of the options are
 
@@ -268,7 +280,8 @@ To add some optional settings, one might do::
 
   cice.setup --case mycase2 --mach spirit --env intel --set debug,diag1,run1year
 
-Once the cases are created, users are free to modify the cice.settings and ice_in namelist to further modify their setup.
+Once the cases are created, users are free to modify the **cice.settings** and 
+**ice_in** namelist to further modify their setup.
 
 .. _cicebuild:
 
@@ -347,6 +360,25 @@ automatically clean the prior build.  If incremental builds are desired to save
 time during development, the ``ICE_CLEANBUILD`` setting in **cice.settings** should
 be modified.
 
+.. _cicecpps:
+
+C Preprocessor (CPP) Macros
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+There are a number of C Preprocessing Macros supported in the CICE model.  These
+allow certain coding features like NetCDF, MPI, or specific Fortran features to be 
+excluded or included during the compile.  
+
+The CPPs are defined by the `CPPDEFS` variable in the Makefile.  They are defined
+by passing the -D[CPP] to the C and Fortran compilers (ie. -DUSE_NETCDF) and this
+is what needs to be set in the `CPPDEFS` variable.  The value of `ICE_CPPDEFS` in
+**cice.settings** is copied into the Makefile `CPPDEFS` variable as are settings
+hardwired into the **Macros.[machine]_[environment]** file.
+
+In general, ``-DFORTRANUNDERSCORE`` should always be set to support the Fortran/C
+interfaces in **ice_shr_reprosum.c**.  In addition, if NetCDF is used, ``-DUSE_NETCDF``
+should also be defined.  A list of available CPPs can be found in
+:ref:`tabcpps`.
 
 .. _porting:
 
@@ -367,13 +399,16 @@ To port, an **env.[machine]_[environment]** and **Macros.[machine]_[environment]
 **configuration/scripts/machines/** directory and the 
 **configuration/scripts/cice.batch.csh** and **configuration/scripts/cice.launch.csh** files need to be modified.
 In general, the machine is specified in ``cice.setup`` with ``--mach``
-and the environment (compiler) is specified with ``--env``.
+and the environment (compiler) is specified with ``--env``.  mach and env 
+in combination define the compiler, compiler version, supporting libaries,
+and batch information.  Multiple compilation environments can be created for
+a single machine by choosing unique env names.
  
 - cd to **configuration/scripts/machines/**
 
 - Copy an existing env and a Macros file to new names for your new machine
 
-- Edit your env and Macros files
+- Edit your env and Macros files, update as needed
 
 - cd .. to **configuration/scripts/**
 
@@ -407,8 +442,10 @@ system.  Some variables are optional.
    :header: "variable", "format", "description"
    :widths: 15, 15, 25
 
-   "ICE_MACHINE_ENVNAME", "string", "machine name"
-   "ICE_MACHINE_COMPILER", "string", "compiler"
+   "ICE_MACHINE_MACHNAME", "string", "machine name"
+   "ICE_MACHINE_MACHINFO", "string", "machine information"
+   "ICE_MACHINE_ENVNAME", "string", "env/compiler name"
+   "ICE_MACHINE_ENVINFO", "string", "env/compiler information"
    "ICE_MACHINE_MAKE", "string", "make command"
    "ICE_MACHINE_WKDIR", "string", "root work directory"
    "ICE_MACHINE_INPUTDATA", "string", "root input data directory"
@@ -428,6 +465,7 @@ system.  Some variables are optional.
 
 Cross-compiling
 ~~~~~~~~~~~~~~~
+
 It can happen that the model must be built on a platform and run on another, for example when the run environment is only available in a batch queue. The program **makdep** (see :ref:`overview`), however, is both compiled and run as part of the build process.
 
 In order to support this, the Makefile uses a variable ``CFLAGS_HOST`` that can hold compiler flags specfic to the build machine for the compilation of makdep. If this feature is needed, add the variable ``CFLAGS_HOST`` to the **Macros.[machine]_[environment]** file. For example : ::
@@ -444,7 +482,7 @@ the **env.[machine]** file.  The easiest way to change a user's default is to
 create a file in your home directory called **.cice\_proj** and add your 
 preferred account name to the first line.  
 There is also an option (``--acct``) in **cice.setup** to define the account number.  
-The order of precedent is **cice.setup** command line option, 
+The order of precedence is **cice.setup** command line option, 
 **.cice\_proj** setting, and then value in the **env.[machine]** file.
 
 .. _queue:
@@ -671,7 +709,7 @@ If you prefer that some or all of the CICE directories be located somewhere else
 
 Note: if you wish, you can also create a complete machine port for your computer by leveraging the conda configuration as a starting point. See :ref:`porting`.
 
-Next, create the "cice" conda environment from the ``environment.yml`` file:
+Next, create the "cice" conda environment from the ``environment.yml`` file in the CICE source code repository.  You will need to clone CICE to run the following command:
 
 .. code-block:: bash
 
@@ -779,7 +817,11 @@ Run Directories
 
 The **cice.setup** script creates a case directory.  However, the model 
 is actually built and run under the ``ICE_OBJDIR`` and ``ICE_RUNDIR`` directories
-as defined in the **cice.settings** file.
+as defined in the **cice.settings** file.  It's important to note that when the
+run scripts are submitted, the current **ice_in**, **cice.settings**, and **env.[machine]**
+files are copied from the case directory into the run directory.  Users should 
+generally not edit files in the run directory as these are overwritten when following
+the standard workflow.
 
 Build and run logs will be copied from the run directory into the case **logs/** 
 directory when complete.

@@ -11,7 +11,7 @@
     restart        = .true.
     restart_ext    = .false.
     use_restart_time = .true.
-    restart_format = 'nc'
+    restart_format = 'default'
     lcdf64         = .false.
     numin          = 21
     numax          = 89
@@ -27,6 +27,7 @@
     diag_file      = 'ice_diag.d'
     print_global   = .true.
     print_points   = .true.
+    conserv_check  = .false.
     latpnt(1)      =  90.
     lonpnt(1)      =  0.
     latpnt(2)      = -65.
@@ -37,6 +38,8 @@
     hist_avg       = .true.
     history_dir    = './history/'
     history_file   = 'iceh'
+    history_precision = 4
+    history_format = 'default'
     write_ic       = .true.
     incond_dir     = './history/'
     incond_file    = 'iceh_ic'
@@ -49,6 +52,7 @@
     grid_file    = 'grid'
     kmt_file     = 'kmt'
     bathymetry_file = 'unknown_bathymetry_file'
+    bathymetry_format = 'default'
     use_bathymetry = .false.
     gridcpl_file = 'unknown_gridcpl_file'
     kcatbound    = 0
@@ -60,9 +64,11 @@
     nilyr        = 7
     nslyr        = 1
     nblyr        = 7
+    orca_halogrid = .false.
 /
 
 &tracer_nml
+    n_iso        = 0
     n_aero       = 1
     n_zaero      = 0
     n_algae      = 0
@@ -83,6 +89,8 @@
     restart_pond_topo = .false.
     tr_pond_lvl  = .true.
     restart_pond_lvl  = .false.
+    tr_iso       = .false.
+    restart_iso  = .false.
     tr_aero      = .false.
     restart_aero = .false.
     tr_fsd       = .false.
@@ -93,12 +101,16 @@
     kitd              = 1
     ktherm            = 2
     conduct           = 'bubbly'
+    ksno              = 0.3d0
     a_rapid_mode      =  0.5e-3
     Rac_rapid_mode    =    10.0
     aspect_rapid_mode =     1.0
     dSdt_slow_mode    = -5.0e-8
     phi_c_slow_mode   =    0.05
     phi_i_mushy       =    0.85
+    sw_redist         = .false.
+    sw_frac           = 0.9d0
+    sw_dtemp          = 0.02d0
 /
 
 &dynamics_nml
@@ -113,6 +125,8 @@
     krdg_partic     = 1
     krdg_redist     = 1
     mu_rdg          = 3
+    Pstar           = 2.75e4
+    Cstar           = 20
     Cf              = 17.
     Ktens           = 0.
     e_ratio         = 2.
@@ -124,6 +138,7 @@
     coriolis        = 'latitude'
     kridge          = 1
     ktransport      = 1
+    ssh_stress      = 'geostrophic'
 /
 
 &shortwave_nml
@@ -156,10 +171,12 @@
 &forcing_nml
     formdrag        = .false.
     atmbndy         = 'default'
+    rotate_wind     = .true.
     calc_strair     = .true.
     calc_Tsfc       = .true.
     highfreq        = .false.
     natmiter        = 5
+    atmiter_conv    = 0.0d0
     ustar_min       = 0.0005
     emissivity      = 0.95
     fbot_xfer_type  = 'constant'
@@ -170,6 +187,7 @@
     wave_spec_type  = 'none'
     wave_spec_file  = 'unknown_wave_spec_file'
     nfreq           = 25
+    restart_coszen  = .false.
     restore_ice     = .false.
     restore_ocn     = .false.
     trestore        =  90
@@ -205,6 +223,7 @@
     maskhalo_dyn      = .false.
     maskhalo_remap    = .false.
     maskhalo_bound    = .false.
+    add_mpi_barriers  = .false.
 /
 
 &zbgc_nml
@@ -489,7 +508,8 @@
     f_fcondtopn_ai = 'x'
     f_fmelttn_ai   = 'x'
     f_flatn_ai     = 'x'
-    f_fsensn_ai     = 'x'
+    f_fsensn_ai    = 'x'
+    f_CMIP         = 'x'
 /
 
 &icefields_mechred_nml
@@ -529,9 +549,12 @@
 /
 
 &icefields_bgc_nml
+    f_fiso_atm     = 'x'
+    f_fiso_ocn     = 'x'
+    f_iso          = 'x'
     f_faero_atm    = 'x'
     f_faero_ocn    = 'x'
-    f_aero         = 'x'  
+    f_aero         = 'x'
     f_fbio         = 'm'
     f_fbio_ai      = 'm'
     f_zaero        = 'x'

@@ -44,12 +44,15 @@
       integer (kind=int_kind) ::                      &
          ntrace              ! number of tracers in use
                           
-      integer (kind=int_kind), dimension(:), allocatable ::             &
+      integer (kind=int_kind), dimension(:), allocatable, public ::      &
          tracer_type       ,&! = 1, 2, or 3 (depends on 0, 1 or 2 other tracers)
          depend              ! tracer dependencies (see below)
 
-      logical (kind=log_kind), dimension (:), allocatable ::             &
+      logical (kind=log_kind), dimension (:), allocatable, public ::     &
          has_dependents      ! true if a tracer has dependent tracers
+
+      logical (kind=log_kind), public ::     &
+         conserv_check       ! if true, check conservation
 
       integer (kind=int_kind), parameter ::                      &
          integral_order = 3   ! polynomial order of quadrature integrals
@@ -82,7 +85,7 @@
 
       integer (kind=int_kind) :: ntrcr, nt_Tsfc, nt_qice, nt_qsno, &
           nt_sice, nt_fbri, nt_iage, nt_FY, nt_alvl, nt_vlvl, &
-          nt_apnd, nt_hpnd, nt_ipnd, nt_fsd, nt_bgc_Nit, nt_bgc_S
+          nt_apnd, nt_hpnd, nt_ipnd, nt_fsd, nt_isosno, nt_isoice, nt_bgc_Nit, nt_bgc_S
 
       character(len=*), parameter :: subname = '(init_transport)'
 
@@ -93,7 +96,8 @@
           nt_qsno_out=nt_qsno, nt_sice_out=nt_sice, nt_fbri_out=nt_fbri, &
           nt_iage_out=nt_iage, nt_FY_out=nt_FY, nt_alvl_out=nt_alvl, nt_fsd_out=nt_fsd, &
           nt_vlvl_out=nt_vlvl, nt_apnd_out=nt_apnd, nt_hpnd_out=nt_hpnd, &
-          nt_ipnd_out=nt_ipnd, nt_bgc_Nit_out=nt_bgc_Nit, nt_bgc_S_out=nt_bgc_S)
+          nt_ipnd_out=nt_ipnd, nt_bgc_Nit_out=nt_bgc_Nit, nt_bgc_S_out=nt_bgc_S, &
+          nt_isosno_out=nt_isosno, nt_isoice_out=nt_isoice)
       call icepack_warnings_flush(nu_diag)
       if (icepack_warnings_aborted()) call abort_ice(error_message=subname, &
          file=__FILE__, line=__LINE__)
@@ -146,62 +150,70 @@
 
           ! diagnostic output
           if (my_task == master_task) then
-          write (nu_diag, *) 'tracer        index      depend        type has_dependents'
+          write (nu_diag, *) 'tracer          index  depend  type has_dependents'
              nt = 1
-                write(nu_diag,*) '   hi  ',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'hi          ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              nt = 2
-                write(nu_diag,*) '   hs  ',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'hs          ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
           k=2
           do nt = k+1, k+ntrcr
              if (nt-k==nt_Tsfc) &
-                write(nu_diag,*) 'nt_Tsfc',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_Tsfc     ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_qice) &
-                write(nu_diag,*) 'nt_qice',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_qice     ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_qsno) &
-                write(nu_diag,*) 'nt_qsno',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_qsno     ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_sice) &
-                write(nu_diag,*) 'nt_sice',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_sice     ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_fbri) &
-                write(nu_diag,*) 'nt_fbri',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_fbri     ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_iage) &
-                write(nu_diag,*) 'nt_iage',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_iage     ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_FY) &
-                write(nu_diag,*) 'nt_FY  ',  nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_FY       ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_alvl) &
-                write(nu_diag,*) 'nt_alvl',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_alvl     ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_vlvl) &
-                write(nu_diag,*) 'nt_vlvl',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_vlvl     ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_apnd) &
-                write(nu_diag,*) 'nt_apnd',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_apnd     ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_hpnd) &
-                write(nu_diag,*) 'nt_hpnd',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_hpnd     ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_ipnd) &
-                write(nu_diag,*) 'nt_ipnd',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_ipnd     ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_fsd) &
-                write(nu_diag,*) 'nt_fsd ',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_fsd      ',nt,depend(nt),tracer_type(nt),&
+                                              has_dependents(nt)
+             if (nt-k==nt_isosno) &
+                write(nu_diag,1000) 'nt_isosno   ',nt,depend(nt),tracer_type(nt),&
+                                              has_dependents(nt)
+             if (nt-k==nt_isoice) &
+                write(nu_diag,1000) 'nt_isoice   ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_bgc_Nit) &
-                write(nu_diag,*) 'nt_bgc_Nit',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_bgc_Nit  ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
              if (nt-k==nt_bgc_S) &
-                write(nu_diag,*) 'nt_bgc_S',nt,depend(nt),tracer_type(nt),&
+                write(nu_diag,1000) 'nt_bgc_S    ',nt,depend(nt),tracer_type(nt),&
                                               has_dependents(nt)
           enddo
+          write(nu_diag,*) ' '
           endif ! master_task
+  1000    format (1x,a,2x,i6,2x,i6,2x,i4,4x,l4)
 
           if (trim(advection)=='remap') call init_remap    ! grid quantities
 
@@ -281,7 +293,6 @@
       ! variables related to optional bug checks
 
       logical (kind=log_kind), parameter ::     &
-         l_conservation_check = .false. ,&! if true, check conservation
          l_monotonicity_check = .false.   ! if true, check monotonicity
 
       real (kind=dbl_kind), dimension(0:ncat) ::     &
@@ -300,6 +311,8 @@
 
       real (kind=dbl_kind), dimension (nx_block,ny_block,max_blocks) :: &
          work1
+
+      character(len=char_len_long) :: fieldid
 
       character(len=*), parameter :: subname = '(transport_remap)'
 
@@ -389,7 +402,7 @@
 !---! Optional conservation and monotonicity checks.
 !---!-------------------------------------------------------------------
 
-      if (l_conservation_check) then
+      if (conserv_check) then
 
     !-------------------------------------------------------------------
     ! Compute initial values of globally conserved quantities.
@@ -427,7 +440,7 @@
             enddo               ! nt
          enddo                  ! n
 
-      endif                     ! l_conservation_check
+      endif                     ! conserv_check
       
       if (l_monotonicity_check) then
 
@@ -556,7 +569,7 @@
     ! Check global conservation of area and area*tracers.  (Optional)
     !-------------------------------------------------------------------
 
-      if (l_conservation_check) then
+      if (conserv_check) then
 
          do n = 0, ncat
             asum_final(n) = global_sum(aim(:,:,n,:),     distrb_info,      &
@@ -591,25 +604,27 @@
          enddo                  ! n
 
          if (my_task == master_task) then
-            call global_conservation (l_stop,     &
+            fieldid = subname//':000'
+            call global_conservation (l_stop, fieldid,     &
                                       asum_init(0), asum_final(0))
 
             if (l_stop) then
-               write (nu_diag,*) 'istep1, my_task, iblk =',     &
-                                  istep1, my_task, iblk
+               write (nu_diag,*) 'istep1, my_task =',     &
+                                  istep1, my_task
                write (nu_diag,*) 'transport: conservation error, cat 0'
                call abort_ice(subname//'ERROR: conservation error1')
             endif
 
-            do n = 1, ncat               
+            do n = 1, ncat
+               write(fieldid,'(a,i3.3)') subname,n
                call global_conservation                                 &
-                                     (l_stop,                           &
+                                     (l_stop, fieldid,                  &
                                       asum_init(n),    asum_final(n),   &
                                       atsum_init(:,n), atsum_final(:,n))
 
                if (l_stop) then
-                  write (nu_diag,*) 'istep1, my_task, iblk, cat =',     &
-                                     istep1, my_task, iblk, n
+                  write (nu_diag,*) 'istep1, my_task, cat =',     &
+                                     istep1, my_task, n
                   write (nu_diag,*) 'transport: conservation error, cat ',n
                   call abort_ice(subname//'ERROR: conservation error2')
                endif
@@ -617,7 +632,7 @@
 
          endif                  ! my_task = master_task
 
-      endif                     ! l_conservation_check
+      endif                     ! conserv_check
 
     !-------------------------------------------------------------------
     ! Check tracer monotonicity.  (Optional)
@@ -1068,9 +1083,12 @@
 !
 ! author William H. Lipscomb, LANL
 
-      subroutine global_conservation (l_stop,                     &
+      subroutine global_conservation (l_stop, fieldid,            &
                                       asum_init,  asum_final,     &
                                       atsum_init, atsum_final)
+
+      character(len=*), intent(in) ::     &
+         fieldid       ! field information string
 
       real (kind=dbl_kind), intent(in) ::     &
          asum_init   ,&! initial global ice area
@@ -1104,11 +1122,11 @@
          if (abs(diff/asum_init) > puny) then
             l_stop = .true.
             write (nu_diag,*)
-            write (nu_diag,*) 'Ice area conserv error'
-            write (nu_diag,*) 'Initial global area =', asum_init
-            write (nu_diag,*) 'Final global area =', asum_final
-            write (nu_diag,*) 'Fractional error =', abs(diff)/asum_init
-            write (nu_diag,*) 'asum_final-asum_init =', diff
+            write (nu_diag,*) subname,'Ice area conserv error ', trim(fieldid)
+            write (nu_diag,*) subname,'  Initial global area  =', asum_init
+            write (nu_diag,*) subname,'  Final global area    =', asum_final
+            write (nu_diag,*) subname,'  Fractional error     =', abs(diff)/asum_init
+            write (nu_diag,*) subname,'  asum_final-asum_init =', diff
          endif
       endif
 
@@ -1119,15 +1137,12 @@
             if (abs(diff/atsum_init(nt)) > puny) then
                l_stop = .true.
                write (nu_diag,*)
-               write (nu_diag,*) 'area*tracer conserv error'
-               write (nu_diag,*) 'tracer index =', nt
-               write (nu_diag,*) 'Initial global area*tracer =',   &
-                                  atsum_init(nt)
-               write (nu_diag,*) 'Final global area*tracer =',     &
-                                  atsum_final(nt)
-               write (nu_diag,*) 'Fractional error =',             &
-                                  abs(diff)/atsum_init(nt)
-               write (nu_diag,*) 'atsum_final-atsum_init =', diff
+               write (nu_diag,*) subname,'Ice area*tracer conserv error ', trim(fieldid),nt
+               write (nu_diag,*) subname,'  Tracer index               =', nt
+               write (nu_diag,*) subname,'  Initial global area*tracer =', atsum_init(nt)
+               write (nu_diag,*) subname,'  Final global area*tracer   =', atsum_final(nt)
+               write (nu_diag,*) subname,'  Fractional error           =', abs(diff)/atsum_init(nt)
+               write (nu_diag,*) subname,'  atsum_final-atsum_init     =', diff
             endif
          endif
        enddo

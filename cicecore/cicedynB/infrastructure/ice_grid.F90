@@ -376,6 +376,8 @@
 #endif
       elseif (trim(grid_type) == 'cpom_grid') then
          call cpomgrid          ! cpom model orca1 type grid
+      elseif (trim(grid_type) == 'hycom') then
+         call hycom_grid  ! hycom grid for Navy GOFS/ESPC 
       else
          call rectgrid          ! regular rectangular grid
       endif
@@ -882,6 +884,129 @@
 #endif
 
       end subroutine popgrid_nc
+
+!=======================================================================
+    subroutine hycom_grid
+      ! !IROUTINE: hycom_grid - read and set HYCOM grid and land mask
+      ! !INTERFACE:
+      !-----------------------------------------------------------------
+      !  HYCOM rotated spherical grid and land mask
+      !  rec no.         field         units
+      !  -------         -----         -----
+      !   land mask
+      !         1             KMT
+      !   grid
+      !         2            ULAT         radians
+      !         3            ULON         radians
+      !         4             HTN           m
+      !         5             HTE           m
+      !         6            ANGLE        radians
+      !
+      ! NOTE: There is no separate kmt file.  Land mask is part of grid file.
+      !-----------------------------------------------------------------
+      ! !DESCRIPTION:
+      ! HYCOM grid and mask developed by Alan Wallcraft
+      ! !REVISION HISTORY:
+      ! David Hebert: updated for CICE6
+      ! authors: David Hebert: removed ESMF from version created by Alan Wallcraft
+      ! authors: Alan Wallcraft (based on popgrid)
+      use ice_blocks, only: nx_block, ny_block
+      use ice_constants, only: c0, c1, m_to_cm, &
+                field_loc_center, field_loc_NEcorner, &
+                field_type_scalar, field_type_angle
+      use ice_domain_size, only: max_blocks
+
+      integer (kind=int_kind) :: &
+         i, j, iblk, &
+         ilo,ihi,jlo,jhi      ! beginning and end of physical domain
+
+      logical (kind=log_kind) :: diag
+
+      real (kind=dbl_kind), dimension(:,:), allocatable :: &
+         work_g1
+
+      real (kind=dbl_kind), dimension (nx_block,ny_block,max_blocks) :: &
+         work1
+
+      real(kind=dbl_kind) :: &
+           pi
+
+      character(len=*), parameter :: subname = '(hycom_grid)'
+
+      ! get pi from icepack, since it is not defined in CICE constants
+      call icepack_query_parameters(pi_out=pi)
+      call icepack_warnings_flush(nu_diag)
+      if (icepack_warnings_aborted()) call abort_ice(error_message=subname, &
+         file=__FILE__, line=__LINE__)
+
+      diag = .true.       ! write diagnostic info
+
+      call ice_open(nu_grid,grid_file,64)
+
+      if (my_task == master_task) &
+         write(nu_diag,*)'** Reading HYCOM grid **'
+
+      !-----------------------------------------------------------------
+      ! land mask HM
+      !-----------------------------------------------------------------
+      allocate(work_g1(nx_global,ny_global))
+
+      call ice_read_global(nu_grid,1,work_g1,'rda8',.true.)   ! HM
+      call scatter_global(hm, work_g1, master_task, distrb_info, &
+                          field_loc_center, field_type_scalar)
+
+
+      !-----------------------------------------------------------------
+      ! lat, lon
+      !-----------------------------------------------------------------
+      call ice_read_global(nu_grid,2,work_g1,'rda8',.true.)   ! ULAT
+      call gridbox_verts(work_g1,latt_bounds)
+      call scatter_global(ULAT, work_g1, master_task, distrb_info, &
+                          field_loc_NEcorner, field_type_scalar)
+      call ice_HaloExtrapolate(ULAT,distrb_info, &
+                               ew_boundary_type, ns_boundary_type)
+
+      call ice_read_global(nu_grid,3,work_g1,'rda8',.true.)   ! ULON
+      call gridbox_verts(work_g1,lont_bounds)
+      call scatter_global(ULON, work_g1, master_task, distrb_info, &
+                          field_loc_NEcorner, field_type_scalar)
+      call ice_haloExtrapolate(ULON,distrb_info, &
+                               ew_boundary_type, ns_boundary_type)
+
+      !-----------------------------------------------------------------
+      ! grid lengths HTN, HTE
+      !-----------------------------------------------------------------
+      call ice_read_global(nu_grid,4,work_g1,'rda8',.true.)   ! HTN
+      ! convert HTN to from m to cm
+      do j = 1,ny_global
+      do i = 1,nx_global
+         work_g1(i,j) = work_g1(i,j) * m_to_cm
+      enddo
+      enddo
+      call primary_grid_lengths_HTN(work_g1)
+
+      call ice_read_global(nu_grid,5,work_g1,'rda8',.true.)   ! HTE
+      ! convert HTE to from m to cm
+      do j = 1,ny_global
+      do i = 1,nx_global
+         work_g1(i,j) = work_g1(i,j) * m_to_cm
+      enddo
+      enddo
+      call primary_grid_lengths_HTE(work_g1)
+
+      !-----------------------------------------------------------------
+      ! grid angle
+      !-----------------------------------------------------------------
+      call ice_read_global(nu_grid,6,work_g1,'rda8',.true.)   ! ANGLE
+      call scatter_global(ANGLE, work_g1, master_task, distrb_info, &
+                          field_loc_NEcorner, field_type_scalar)
+
+      deallocate(work_g1)
+
+      if (my_task == master_task) close(nu_grid)
+
+    end subroutine hycom_grid
+!=======================================================================
 
 #ifdef CESMCOUPLED
 !=======================================================================

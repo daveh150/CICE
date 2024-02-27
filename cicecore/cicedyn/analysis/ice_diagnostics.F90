@@ -1896,7 +1896,7 @@
       write(nu_diag,*) 'vvel(i,j)',vvel(i,j,iblk)
       if (grid_ice == 'C') then
          write(nu_diag,*) 'uvelE(i,j)',uvelE(i,j,iblk)
-         write(nu_diag,*) 'uvelN(i,j)',uvelN(i,j,iblk)
+         write(nu_diag,*) 'vvelN(i,j)',vvelN(i,j,iblk)
       elseif (grid_ice == 'CD') then
          write(nu_diag,*) 'uvelE(i,j)',uvelE(i,j,iblk)
          write(nu_diag,*) 'vvelE(i,j)',vvelE(i,j,iblk)
